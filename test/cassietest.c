@@ -14,7 +14,8 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include "cassiemujoco.h"
+#include "cassiemujoco/cassiemujoco.h"
+
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,7 +23,8 @@
 
 int main(void)
 {
-    const char* modelfile = "../model/cassie.xml";
+    const char* modelfile = CASSIE_SIM_MODEL_DIR "cassie.xml";
+    printf("Trying to open %s\n", modelfile);
     cassie_sim_t *c = cassie_sim_init(modelfile, false);
     cassie_vis_t *v = cassie_vis_init(c, modelfile, false);
   
@@ -39,7 +41,7 @@ int main(void)
 
     cassie_sim_free(c);
     cassie_vis_free(v);
-    cassie_cleanup();
+    cassie_mujoco_cleanup();
 
     return 0;
 }

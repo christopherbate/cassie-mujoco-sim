@@ -21,8 +21,9 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-#include "cassiemujoco.h"
-#include "udp.h"
+
+#include "cassiemujoco/udp.h"
+#include "cassiemujoco/cassiemujoco.h"
 
 
 enum mode {

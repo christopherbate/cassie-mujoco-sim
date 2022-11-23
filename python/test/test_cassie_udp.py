@@ -14,20 +14,25 @@
 # ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 # OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
-from cassiemujoco import *
+import cassie_mujoco_sim_py
+from cassie_mujoco_sim_py import pd_in_t
 import time
 
 # Null controller
+
+
 def controller(y):
-    return pd_in_t()
+    return cassie_mujoco_sim_py.pd_in_t()
+
 
 # Set up UDP connection
-cassie = CassieUdp(remote_addr='127.0.0.1')
+def test_cassieudp():
+  cassie = cassie_mujoco_sim_py.CassieUdp(remote_addr='127.0.0.1')
 
-received_data = False
+  received_data = False
 
-# Listen/respond loop
-while True:
+  # Listen/respond loop
+  while True:
     if not received_data:
         # Send packets until the simulator responds
         print('Connecting...')
@@ -51,3 +56,8 @@ while True:
 
     # Send response
     cassie.send_pd(u)
+
+    print("sent control")
+
+if __name__ == '__main__':
+    test_cassieudp()

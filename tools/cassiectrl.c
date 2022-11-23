@@ -20,11 +20,13 @@
 #include <stdio.h>
 #include <time.h>
 #include <unistd.h>
-#include "cassie_out_t.h"
-#include "cassie_user_in_t.h"
-#include "state_out_t.h"
-#include "pd_in_t.h"
-#include "udp.h"
+
+#include "agilitycassie/cassie_out_t.h"
+#include "agilitycassie/cassie_user_in_t.h"
+#include "agilitycassie/state_out_t.h"
+#include "agilitycassie/pd_in_t.h"
+
+#include "cassiemujoco/udp.h"
 
 
 enum mode {

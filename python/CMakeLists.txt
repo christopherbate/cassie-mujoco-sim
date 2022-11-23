@@ -1,0 +1,2 @@
+pybind11_add_module(cassie_mujoco_sim_py cassie_mujoco_sim.cpp)
+target_link_libraries(cassie_mujoco_sim_py PUBLIC cassie_mujoco_sim)

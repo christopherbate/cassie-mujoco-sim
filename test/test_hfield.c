@@ -14,12 +14,13 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include "cassiemujoco.h"
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
+
+#include "cassiemujoco/cassiemujoco.h"
 
 static long get_microseconds(void) {
     struct timespec now;
@@ -119,7 +120,7 @@ Note that you can NOT change the number of columns and rows of hfield data at ru
 
     cassie_vis_free(v);
     cassie_sim_free(c);    
-    cassie_cleanup();
+    cassie_mujoco_cleanup();
 
     return 0;
 }
