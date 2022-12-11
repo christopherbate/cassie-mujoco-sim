@@ -29,7 +29,6 @@
 #include "GLFW/glfw3.h"
 #include "cassie_core_sim.h"
 #include "cassie_in_t.h"
-#include "internal.h"
 #include "mujoco/mujoco.h"
 #include "pd_input.h"
 #include "state_output.h"
@@ -42,6 +41,10 @@
 #include <libgen.h>
 #include <unistd.h>
 #endif
+
+// Debug using one string literal. x cannot contain other printf qualifiers.
+// TODO: replace this with a version that allows substitution qualifiers.
+#define DBGF(x) fprintf(stderr, "%s:%d " x "\n", __FILE__, __LINE__)
 
 #define CASSIE_VIDEO_FRAMERATE "30"
 /*******************************************************************************
@@ -69,6 +72,10 @@ mjvFigure figsensor;
 #define JOINT_FILTER_NB 4
 #define JOINT_FILTER_NA 3
 
+#define NUM_DRIVES 10
+#define NUM_JOINTS 6
+#define TORQUE_DELAY_CYCLES 6
+
 static int drive_filter_b[DRIVE_FILTER_NB] = {2727, 534, -2658, -795, 72,
                                               110,  19,  -6,    -3};
 
@@ -76,6 +83,15 @@ static double joint_filter_b[JOINT_FILTER_NB] = {12.348, 12.348, -12.348,
                                                  -12.348};
 
 static double joint_filter_a[JOINT_FILTER_NA] = {1.0, -1.7658, 0.79045};
+
+typedef struct drive_filter {
+  int x[DRIVE_FILTER_NB];
+} drive_filter_t;
+
+typedef struct joint_filter {
+  double x[JOINT_FILTER_NB];
+  double y[JOINT_FILTER_NA];
+} joint_filter_t;
 
 /*******************************************************************************
  * Drive and joint order X macro lists
@@ -586,9 +602,9 @@ bool cassie_mujoco_init(const char *file_input) {
   return mujoco_initialized;
 }
 
-void delete_init_model() { mj_deleteModel(initial_model); }
+void delete_init_model(void) { mj_deleteModel(initial_model); }
 
-void cassie_cleanup() {
+void cassie_cleanup(void) {
   if (mujoco_initialized) {
     if (initial_model != NULL) {
       mj_deleteModel(initial_model);
@@ -1344,8 +1360,9 @@ void cassie_vis_foot_forces(const cassie_vis_t *c, double cfrc[12]) {
       // Add to total forces on foot
       if (body1 == left_foot_body_id)
         for (int j = 0; j < 3; ++j) cfrc[j] -= force_global[j];
-      else
+      else {
         for (int j = 0; j < 3; ++j) cfrc[j] += force_global[j];
+      }
     }
 
     // Right foot
@@ -2591,7 +2608,7 @@ void cassie_vis_window_resize(cassie_vis_t *v, int width, int height) {
   glfwSetWindowSize(v->window, width, height);
 }
 
-cassie_state_t *cassie_state_alloc() {
+cassie_state_t *cassie_state_alloc(void) {
   cassie_state_t *s = malloc(sizeof(cassie_state_t));
   CASSIE_ALLOC_POINTER(s);
   return s;
