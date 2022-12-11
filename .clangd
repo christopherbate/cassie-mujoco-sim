@@ -1,0 +1,10 @@
+
+If: 
+  PathMatch: [src/.*\.c]
+Diagnostics:
+  ClangTidy:
+    Add:
+      - google*
+CompileFlags:
+  Remove: -fsanitize*
+  Add: [-Wall, -Wextra, -Wpedantic]
