@@ -1,25 +1,27 @@
-add_executable(
-  test_terrain test_terrain.c
-)
-target_link_libraries(test_terrain PRIVATE
+add_cassie_executable(test_terrain SRC
+  test_terrain.c
+
+  LINK_PUBLIC
   CassieMujocoSim
 )
 
-add_executable(
-  test_cassie cassietest.c
-)
-target_link_libraries(test_cassie PRIVATE
+add_cassie_executable(test_cassie SRC
+  cassietest.c
+
+  LINK_PUBLIC
   CassieMujocoSim
 )
 
-add_executable(
-  cassiesim cassiesim.c
-)
-target_link_libraries(cassiesim PRIVATE
+add_cassie_executable(cassiesim SRC
+  cassiesim.c
+
+  LINK_PUBLIC
   CassieMujocoSim
 )
 
-add_executable(cassiectrl cassiectrl.c)
-target_link_libraries(cassiectrl PRIVATE
+add_cassie_executable(cassiectrl SRC
+  cassiectrl.c
+
+  LINK_PUBLIC
   CassieMujocoSim
 )
