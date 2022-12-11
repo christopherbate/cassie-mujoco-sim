@@ -15,18 +15,22 @@
  */
 
 #include "cassiemujoco.h"
+
+#include <assert.h>
+#include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
 #include <sys/types.h>
-#include <pwd.h>
 #include <time.h>
 #include <linux/limits.h>
-#include "mujoco.h"
-#include "glfw3.h"
-#include "mjxmacro.h"
-#include "uitools.h"
+
+#include "GLFW/glfw3.h"
+#include "mujoco/mujoco.h"
+
+#include "cassie_in_t.h"
+#include "internal.h"
 #include "cassie_core_sim.h"
 #include "state_output.h"
 #include "pd_input.h"
@@ -58,131 +62,6 @@ static int right_toe_id;
 static int fontscale = mjFONTSCALE_200;
 mjvFigure figsensor;
 
-
-/*******************************************************************************
- * Dynamic library loading
- ******************************************************************************/
-
-// Loaded MuJoCo functions
-#define MUJOCO_FUNCTION_LIST                    \
-    X(mj_loadXML)                               \
-    X(mj_copyModel)                             \
-    X(mj_deleteModel)                           \
-    X(mj_makeData)                              \
-    X(mj_copyData)                              \
-    X(mj_deleteData)                            \
-    X(mj_resetData)                             \
-    X(mj_forward)                               \
-    X(mj_setConst)                              \
-    X(mj_fwdPosition)                           \
-    X(mj_comVel)                                \
-    X(mj_step1)                                 \
-    X(mj_step2)                                 \
-    X(mj_step)                                  \
-    X(mj_integratePos)                          \
-    X(mj_contactForce)                          \
-    X(mj_name2id)                               \
-    X(mj_id2name)                               \
-    X(mj_fullM)                                 \
-    X(mj_jacBody)                               \
-    X(mj_jacSite)                               \
-    X(mj_kinematics)                            \
-    X(mj_comPos)                                \
-    X(mj_subtreeVel)                            \
-    X(mju_copy)                                 \
-    X(mju_zero)                                 \
-    X(mju_rotVecMatT)                           \
-    X(mju_sub3)                                 \
-    X(mju_mulMatTVec)                           \
-    X(mju_mat2Quat)                             \
-    X(mju_printMat)                             \
-    X(mjv_makeScene)                            \
-    X(mjv_defaultScene)                         \
-    X(mjv_freeScene)                            \
-    X(mjv_updateScene)                          \
-    X(mjv_defaultCamera)                        \
-    X(mjv_defaultOption)                        \
-    X(mjv_movePerturb)                          \
-    X(mjv_moveCamera)                           \
-    X(mjv_initPerturb)                          \
-    X(mjv_select)                               \
-    X(mjv_applyPerturbForce)                    \
-    X(mjv_applyPerturbPose)                     \
-    X(mjr_defaultContext)                       \
-    X(mjv_defaultFigure)                        \
-    X(mjr_makeContext)                          \
-    X(mjr_freeContext)                          \
-    X(mjr_render)                               \
-    X(mjr_overlay)                              \
-    X(mjr_figure)                               \
-    X(mjr_readPixels)
-
-// Loaded GLFW functions
-#define GLFW_FUNCTION_LIST                      \
-    X(glfwInit)                                 \
-    X(glfwTerminate)                            \
-    X(glfwCreateWindow)                         \
-    X(glfwDestroyWindow)                        \
-    X(glfwMakeContextCurrent)                   \
-    X(glfwGetWindowUserPointer)                 \
-    X(glfwSetWindowUserPointer)                 \
-    X(glfwSetWindowCloseCallback)               \
-    X(glfwSetCursorPosCallback)                 \
-    X(glfwSetMouseButtonCallback)               \
-    X(glfwSetScrollCallback)                    \
-    X(glfwSetKeyCallback)                       \
-    X(glfwGetFramebufferSize)                   \
-    X(glfwSwapBuffers)                          \
-    X(glfwSwapInterval)                         \
-    X(glfwPollEvents)                           \
-    X(glfwGetVideoMode)                         \
-    X(glfwGetPrimaryMonitor)                    \
-    X(glfwGetWindowSize)                        \
-    X(glfwGetKey)                               \
-    X(glfwGetMouseButton)                       \
-    X(glfwGetCursorPos)                         \
-    X(glfwRestoreWindow)                        \
-    X(glfwMaximizeWindow)                       \
-    X(glfwSetWindowShouldClose)                 \
-    X(glfwWindowShouldClose)                    \
-    X(glfwSetWindowSize)                        \
-    X(glClear)                                  \
-    X(glfwWindowHint)
-
-// Dynamic object handles
-static void *mj_handle;
-static void *glfw_handle;
-static void *gl_handle;
-static void *glew_handle;
-
-// Function pointers
-#define X(fun)                                  \
-    typedef __typeof__(fun) fun ## _fp_type;    \
-    static fun ## _fp_type *fun ## _fp;
-MUJOCO_FUNCTION_LIST
-GLFW_FUNCTION_LIST
-#undef X
-
-// Cross-platform dynamic loading
-#ifdef _WIN32
-
-#define LOADLIB(path) LoadLibrary(path)
-#define UNLOADLIB(handle) FreeLibrary(handle)
-#define LOADFUN(handle, sym) sym ## _fp = (void*) GetProcAddress(handle, #sym)
-#define MJLIBNAME "mujoco210.dll"
-#define GLFWLIBNAME "glfw3.dll"
-
-#else
-
-#define LOADLIB(path) dlopen(path, RTLD_LAZY | RTLD_GLOBAL)
-#define UNLOADLIB(handle) dlclose(handle)
-#define LOADFUN(handle, sym) sym ## _fp = dlsym(handle, #sym)
-#define MJLIBNAME "libmujoco210.so"
-#define MJLIBNAMENOGL "libmujoco210nogl.so"
-#define GLFWLIBNAME "libglfw.so.3"
-
-#endif
-
 /*******************************************************************************
  * Sensor filtering
  ******************************************************************************/
@@ -202,16 +81,6 @@ static double joint_filter_b[JOINT_FILTER_NB] = {
 static double joint_filter_a[JOINT_FILTER_NA] = {
     1.0, -1.7658, 0.79045
 };
-
-typedef struct drive_filter {
-    int x[DRIVE_FILTER_NB];
-} drive_filter_t;
-
-typedef struct joint_filter {
-    double x[JOINT_FILTER_NB];
-    double y[JOINT_FILTER_NA];
-} joint_filter_t;
-
 
 /*******************************************************************************
  * Drive and joint order X macro lists
@@ -241,10 +110,6 @@ typedef struct joint_filter {
 /*******************************************************************************
  * Opaque structure definitions
  ******************************************************************************/
-
-#define NUM_DRIVES 10
-#define NUM_JOINTS 6
-#define TORQUE_DELAY_CYCLES 6
 
 #define MAX_VIS_MARKERS 500
 
@@ -425,7 +290,7 @@ const char help_title[] =
 
 #define CASSIE_ALLOC_POINTER(c)                 \
     do {                                        \
-        c->d = mj_makeData_fp(initial_model);   \
+        c->d = mj_makeData(initial_model);   \
         c->core = cassie_core_sim_alloc();      \
         c->estimator = state_output_alloc();    \
         c->pd = pd_input_alloc();               \
@@ -433,7 +298,7 @@ const char help_title[] =
 
 #define CASSIE_SIM_ALLOC_POINTER(c)                 \
     do {                                        \
-        c->d = mj_makeData_fp(c->m);   \
+        c->d = mj_makeData(c->m);   \
         c->core = cassie_core_sim_alloc();      \
         c->estimator = state_output_alloc();    \
         c->pd = pd_input_alloc();               \
@@ -441,7 +306,7 @@ const char help_title[] =
 
 #define CASSIE_FREE_POINTER(c)                  \
     do {                                        \
-        mj_deleteData_fp(c->d);                 \
+        mj_deleteData(c->d);                 \
         cassie_core_sim_free(c->core);          \
         state_output_free(c->estimator);        \
         pd_input_free(c->pd);                   \
@@ -460,7 +325,7 @@ const char help_title[] =
 
 #define CASSIE_COPY_POINTER(dst, src)                       \
     do {                                                    \
-        mj_copyData_fp(dst->d, initial_model, src->d);      \
+        mj_copyData(dst->d, initial_model, src->d);      \
         cassie_core_sim_copy(dst->core, src->core);         \
         state_output_copy(dst->estimator, src->estimator);  \
         pd_input_copy(dst->pd, src->pd);                    \
@@ -468,7 +333,7 @@ const char help_title[] =
 
 #define CASSIE_SIM_COPY_POINTER(dst, src)                       \
     do {                                                    \
-        mj_copyData_fp(dst->d, src->m, src->d);      \
+        mj_copyData(dst->d, src->m, src->d);      \
         cassie_core_sim_copy(dst->core, src->core);         \
         state_output_copy(dst->estimator, src->estimator);  \
         pd_input_copy(dst->pd, src->pd);                    \
@@ -477,75 +342,6 @@ const char help_title[] =
 /*******************************************************************************
  * Private functions
  ******************************************************************************/
-
-static bool load_glfw_library(const char *basedir)
-{
-    // Buffer for paths
-    char buf[4096 + 1024];
-
-#ifndef _WIN32
-    // Open dependencies
-    gl_handle = LOADLIB("libGL.so.1");
-    snprintf(buf, sizeof buf, "%.4096s/.mujoco/mujoco210/bin/libglew.so", basedir);
-    glew_handle = LOADLIB(buf);
-    if (!gl_handle || !glew_handle) {
-        printf("gl_handle or glew_handle not loaded\n");
-        return false;
-    }
-#endif
-
-    // Open library
-    snprintf(buf, sizeof buf, "%.4096s/.mujoco/mujoco210/bin/" GLFWLIBNAME, basedir);
-    glfw_handle = LOADLIB(buf);
-    if (!glfw_handle) {
-        //fprintf(stderr, "Failed to load %s\n", buf);
-        return false;
-    }
-
-    // Get function pointers
-#define X(fun) LOADFUN(glfw_handle, fun);
-GLFW_FUNCTION_LIST
-#undef X
-
-    return true;
-}
-
-
-static bool load_mujoco_library()
-{
-    // Buffer for paths
-    char buf[4096 + 1024];
-    // Get home directory
-    const char* homedir;
-    if ((homedir = getenv("HOME")) == NULL) {
-        homedir = getpwuid(getuid())->pw_dir;
-    }
-
-    // Try loading GLFW
-    bool __attribute__((unused)) gl = load_glfw_library(homedir);
-    //struct passwd *pw = getpwuid(getuid());
-    
-    // Choose library version
-    snprintf(buf, sizeof buf, "%.4096s/.mujoco/mujoco210/bin/" MJLIBNAME, homedir);
-#ifndef _WIN32
-    if (!gl) {
-        snprintf(buf, sizeof buf, "%.4096s/.mujoco/mujoco210/bin/" MJLIBNAMENOGL, homedir);
-    }
-#endif
-
-    // Open library
-    mj_handle = LOADLIB(buf);
-    if (!mj_handle) {
-        fprintf(stderr, "Failed to load %s\n%s\n", buf, dlerror());
-        return false;
-    }
-
-    // Get function pointers
-#define X(fun) LOADFUN(mj_handle, fun);
-MUJOCO_FUNCTION_LIST
-#undef X
-    return true;
-}
 
 
 static void drive_encoder(const mjModel *m,
@@ -659,7 +455,7 @@ static double motor(const mjModel* m, mjData *d, int i, double u,
 
 static void window_close_callback(GLFWwindow *window)
 {
-    cassie_vis_close(glfwGetWindowUserPointer_fp(window));
+    cassie_vis_close(glfwGetWindowUserPointer(window));
 }
 
 
@@ -756,18 +552,18 @@ static void cassie_sensor_data(cassie_sim_t *c)
                       &c->joint_filter[i], joint_sensor_ids[i]);
 
     // IMU
-    mju_copy_fp(c->cassie_out.pelvis.vectorNav.orientation,
+    mju_copy(c->cassie_out.pelvis.vectorNav.orientation,
                 &c->d->sensordata[16], 4);
-    mju_copy_fp(c->cassie_out.pelvis.vectorNav.angularVelocity,
+    mju_copy(c->cassie_out.pelvis.vectorNav.angularVelocity,
                 &c->d->sensordata[20], 3);
-    mju_copy_fp(c->cassie_out.pelvis.vectorNav.linearAcceleration,
+    mju_copy(c->cassie_out.pelvis.vectorNav.linearAcceleration,
                 &c->d->sensordata[23], 3);
-    mju_copy_fp(c->cassie_out.pelvis.vectorNav.magneticField,
+    mju_copy(c->cassie_out.pelvis.vectorNav.magneticField,
                 &c->d->sensordata[26], 3);
 }
 
 void cassie_sim_read_rangefinder(cassie_sim_t *c, double ranges[6]){
-    mju_copy_fp(ranges, &c->d->sensordata[29], 6);
+    mju_copy(ranges, &c->d->sensordata[29], 6);
 }
 
 
@@ -801,169 +597,96 @@ static void cassie_motor_data(cassie_sim_t *c, const cassie_in_t *cassie_in)
  ******************************************************************************/
 
 #define ID_NAME_LOOKUP(model, idvar, objtype, name)                            \
-    do {                                                                \
-        idvar = mj_name2id_fp(model, objtype, #name);                   \
-        if (-1 == idvar) {                                              \
-            fprintf(stderr, "Could not find body named " #name "\n");   \
-            return false;                                               \
-        }                                                               \
-    } while (0)
+  do {                                                                         \
+    idvar = mj_name2id(model, objtype, name);                                  \
+    if (-1 == idvar) {                                                         \
+      fprintf(stderr, "Could not find body named " name "\n");                 \
+    }                                                                          \
+  } while (0)
 
+bool cassie_mujoco_init(const char *file_input) {
 
-bool cassie_mujoco_init(const char *file_input)
-{
-    
-    // Check if mujoco has already been initialized
-    if (!mujoco_initialized) {
-        // If no base directory is provided, use the direectory
-        // containing the executable as the base directory
-#ifdef _WIN32
-        char buf2[1024];
-        HMODULE hModule = GetModuleHandle(NULL);
-        GetModuleFileName(hModule, buf2, sizeof buf2);
-        char bindrive[16];
-        _splitpath_s(buf2, bindrive, sizeof bindrive,
-                     buf, sizeof buf, NULL, 0, NULL, 0);
-        snprintf(buf2, sizeof buf2, "%s%s", bindrive, buf);
-        if (!basedir)
-            basedir = buf2;
-#else
-        char binpath[4096];
-        if (-1 == readlink("/proc/self/exe", binpath, sizeof binpath))
-            fprintf(stderr, "Failed to get binary directory\n");
-        // if (!basedir)
-        //     basedir = dirname(binpath);
-#endif
+  // Check if mujoco has already been initialized
+  if (!mujoco_initialized) {
+    DBGF("Initializing Mujoco");
+    // If no base directory is provided, use the direectory
+    // containing the executable as the base directory
+    printf("Loading: %s\n", file_input);
 
-        // Load MuJoCo
-        if (!load_mujoco_library()) {
-            return false;
-        }
-        // Load the model;
-        char error[1000] = "Could not load XML model";
-        initial_model = mj_loadXML_fp(file_input, 0, error, 1000); 
-        if (!initial_model) {
-            fprintf(stderr, "Load model error: %s\n", error);
-            return false;
-        }
-        int sens_objid[20] = {0, 1, 2, 3, 4, 9, 10, 14, 5, 6, 7, 8, 9, 20, 21, 25, 0, 0, 0, 0};
-        for (int i = 0; i < 20; i++) {
-            initial_model->sensor_objid[i] = sens_objid[i];
-        }
-        // Look up relevant IDs based on names
-        ID_NAME_LOOKUP(initial_model, left_foot_body_id, mjOBJ_BODY, left-foot);
-        ID_NAME_LOOKUP(initial_model, right_foot_body_id, mjOBJ_BODY, right-foot);
-        ID_NAME_LOOKUP(initial_model, left_heel_id, mjOBJ_SITE, left-heel);
-        ID_NAME_LOOKUP(initial_model, left_toe_id, mjOBJ_SITE, left-toe);
-        ID_NAME_LOOKUP(initial_model, right_heel_id, mjOBJ_SITE, right-heel);
-        ID_NAME_LOOKUP(initial_model, right_toe_id, mjOBJ_SITE, right-toe);
-
-        mujoco_initialized = true;
+    // Load the model;
+    char error[1000] = "Could not load XML model";
+    initial_model = mj_loadXML(file_input, 0, error, 1000);
+    if (!initial_model) {
+      fprintf(stderr, "Load model error: %s\n", error);
+      return false;
     }
-    // Initialize GLFW if it was loaded
-    if (glfw_handle && !glfw_initialized) {
-        if (!glfwInit_fp()) {
-            //fprintf(stderr, "Could not initialize GLFW\n");
-            return false;
-        }
-        glfw_initialized = true;
-    }
+    mujoco_initialized = true;
+  }
     return mujoco_initialized;
 }
 
 void delete_init_model() {
-    mj_deleteModel_fp(initial_model);
+    mj_deleteModel(initial_model);
 }
 
-void cassie_cleanup()
-{
-    if (mj_handle) {
-        if (mujoco_initialized) {
-            if (initial_model != NULL) {
-                mj_deleteModel_fp(initial_model);
-                initial_model = NULL;
-            }
-            mujoco_initialized = false;
-        }
 
-        UNLOADLIB(mj_handle);
-        mj_handle = NULL;
+void cassie_cleanup() {
+  if (mujoco_initialized) {
+    if (initial_model != NULL) {
+      mj_deleteModel(initial_model);
+      initial_model = NULL;
     }
-
-    /* 
-    NOTE: For some reason glfwTerminate causes a seg fault, and trying to unload the library without calling 
-    glfwTerminate will causes a memory leak.
-    if (glfw_handle) {
-        if (glfw_initialized) {
-            printf("glfw init true\n");
-            /glfwTerminate_fp();
-            printf("glfwterm\n");
-            glfw_initialized = false;
-        }
-
-        UNLOADLIB(glfw_handle);
-        glfw_handle = NULL;
-        printf("unload glfw lib and set handle to null\n");
-    }
-    */
-
-    if (glew_handle) {
-        UNLOADLIB(glew_handle);
-        glew_handle = NULL;
-    }
-
-    if (gl_handle) {
-        UNLOADLIB(gl_handle);
-        gl_handle = NULL;
-    }
+    mujoco_initialized = false;
+  }
 }
 
-bool cassie_reload_xml(const char* modelfile) {
-    char error[1000] = "Could not load XML model";
-    initial_model = mj_loadXML_fp(modelfile, 0, error, 1000); 
-    if (!initial_model) {
-        fprintf(stderr, "Load model error: %s\n", error);
-        return false;
-    }
-    int sens_objid[20] = {0, 1, 2, 3, 4, 9, 10, 14, 5, 6, 7, 8, 9, 20, 21, 25, 0, 0, 0, 0};
-    for (int i = 0; i < 20; i++) {
-        initial_model->sensor_objid[i] = sens_objid[i];
-    }
-    // Look up relevant IDs based on names
-    ID_NAME_LOOKUP(initial_model, left_foot_body_id, mjOBJ_BODY, left-foot);
-    ID_NAME_LOOKUP(initial_model, right_foot_body_id, mjOBJ_BODY, right-foot);
-    ID_NAME_LOOKUP(initial_model, left_heel_id, mjOBJ_SITE, left-heel);
-    ID_NAME_LOOKUP(initial_model, left_toe_id, mjOBJ_SITE, left-toe);
-    ID_NAME_LOOKUP(initial_model, right_heel_id, mjOBJ_SITE, right-heel);
-    ID_NAME_LOOKUP(initial_model, right_toe_id, mjOBJ_SITE, right-toe);
-    return true;
+bool cassie_reload_xml(const char *modelfile) {
+  char error[1000] = "Could not load XML model";
+  initial_model = mj_loadXML(modelfile, 0, error, 1000);
+  if (!initial_model) {
+    fprintf(stderr, "Load model error: %s\n", error);
+    return false;
+  }
+  int sens_objid[20] = {0, 1, 2, 3,  4,  9,  10, 14, 5, 6,
+                        7, 8, 9, 20, 21, 25, 0,  0,  0, 0};
+  for (int i = 0; i < 20; i++) {
+    initial_model->sensor_objid[i] = sens_objid[i];
+  }
+  // Look up relevant IDs based on names
+  ID_NAME_LOOKUP(initial_model, left_foot_body_id, mjOBJ_BODY, "left-foot");
+  ID_NAME_LOOKUP(initial_model, right_foot_body_id, mjOBJ_BODY, "right-foot");
+  ID_NAME_LOOKUP(initial_model, left_heel_id, mjOBJ_SITE, "left-heel");
+  ID_NAME_LOOKUP(initial_model, left_toe_id, mjOBJ_SITE, "left-toe");
+  ID_NAME_LOOKUP(initial_model, right_heel_id, mjOBJ_SITE, "right-heel");
+  ID_NAME_LOOKUP(initial_model, right_toe_id, mjOBJ_SITE, "right-toe");
+  return true;
 }
 
-void cassie_sim_set_const(cassie_sim_t *c)
-{
-    // Should maybe not reset qpos/qvel/qacc?
-    mj_setConst_fp(c->m, c->d);
-    double qpos_init[35] =
-        {0, 0, 1.01, 1, 0, 0, 0,
-        0.0045, 0, 0.4973, 0.9785, -0.0164, 0.01787, -0.2049,
-        -1.1997, 0, 1.4267, 0, -1.5244, 1.5244, -1.5968,
-        -0.0045, 0, 0.4973, 0.9786, 0.00386, -0.01524, -0.2051,
-        -1.1997, 0, 1.4267, 0, -1.5244, 1.5244, -1.5968};
-    double qvel_zero[c->m->nv];
-    double qacc_zero[c->m->nv];
-    for(int i = 0; i < c->m->nv; i++) {
-      qvel_zero[i] = 0.0f;
-      qacc_zero[i] = 0.0f;
-    }
+void cassie_sim_set_const(cassie_sim_t *c) {
+  // Should maybe not reset qpos/qvel/qacc?
+  assert(c);
+  assert(c->m);
+  assert(c->d);
+  assert(c->m->nq == 35);
+  mj_setConst(c->m, c->d);
+  double qpos_init[35] = {0,       0,       1.01,     1,       0,       0,
+                          0,       0.0045,  0,        0.4973,  0.9785,  -0.0164,
+                          0.01787, -0.2049, -1.1997,  0,       1.4267,  0,
+                          -1.5244, 1.5244,  -1.5968,  -0.0045, 0,       0.4973,
+                          0.9786,  0.00386, -0.01524, -0.2051, -1.1997, 0,
+                          1.4267,  0,       -1.5244,  1.5244,  -1.5968};
+  double qvel_zero[c->m->nv];
+  double qacc_zero[c->m->nv];
+  for (int i = 0; i < c->m->nv; i++) {
+    qvel_zero[i] = 0.0f;
+    qacc_zero[i] = 0.0f;
+  }
 
-    mju_copy_fp(c->d->qpos, qpos_init, 35);
-    mju_copy_fp(c->d->qvel, qvel_zero, c->m->nv);
-    mju_copy_fp(c->d->qacc, qacc_zero, c->m->nv);
-
-    c->d->time = 0.0;
-    mj_forward_fp(c->m, c->d);
+  mju_copy(c->d->qpos, qpos_init, 35);
+  mju_copy(c->d->qvel, qvel_zero, c->m->nv);
+  mju_copy(c->d->qacc, qacc_zero, c->m->nv);
+  mj_forward(c->m, c->d);
 }
-
 
 cassie_sim_t *cassie_sim_init(const char* modelfile, bool reinit)
 {
@@ -982,8 +705,8 @@ cassie_sim_t *cassie_sim_init(const char* modelfile, bool reinit)
     // Filters initialized to zero
     if (reinit) {
         char error[1000] = "Could not load XML model";
-        mj_deleteModel_fp(initial_model);
-        initial_model = mj_loadXML_fp(modelfile, 0, error, 1000); 
+        mj_deleteModel(initial_model);
+        initial_model = mj_loadXML(modelfile, 0, error, 1000); 
         if (!initial_model) {
             fprintf(stderr, "Load model error: %s\n", error);
             return NULL;
@@ -993,16 +716,16 @@ cassie_sim_t *cassie_sim_init(const char* modelfile, bool reinit)
             initial_model->sensor_objid[i] = sens_objid[i];
         }
         // Look up relevant IDs based on names
-        ID_NAME_LOOKUP(initial_model, left_foot_body_id, mjOBJ_BODY, left-foot);
-        ID_NAME_LOOKUP(initial_model, right_foot_body_id, mjOBJ_BODY, right-foot);
-        ID_NAME_LOOKUP(initial_model, left_heel_id, mjOBJ_SITE, left-heel);
-        ID_NAME_LOOKUP(initial_model, left_toe_id, mjOBJ_SITE, left-toe);
-        ID_NAME_LOOKUP(initial_model, right_heel_id, mjOBJ_SITE, right-heel);
-        ID_NAME_LOOKUP(initial_model, right_toe_id, mjOBJ_SITE, right-toe);
-        c->m =  mj_copyModel_fp(NULL, initial_model);
+        ID_NAME_LOOKUP(initial_model, left_foot_body_id, mjOBJ_BODY, "left-foot");
+        ID_NAME_LOOKUP(initial_model, right_foot_body_id, mjOBJ_BODY, "right-foot");
+        ID_NAME_LOOKUP(initial_model, left_heel_id, mjOBJ_SITE, "left-heel");
+        ID_NAME_LOOKUP(initial_model, left_toe_id, mjOBJ_SITE, "left-toe");
+        ID_NAME_LOOKUP(initial_model, right_heel_id, mjOBJ_SITE, "right-heel");
+        ID_NAME_LOOKUP(initial_model, right_toe_id, mjOBJ_SITE, "right-toe");
+        c->m =  mj_copyModel(NULL, initial_model);
     } else {
         // Initialize mjModel
-        c->m = mj_copyModel_fp(NULL, initial_model);
+        c->m = mj_copyModel(NULL, initial_model);
     }
 
     // Allocate pointer types
@@ -1014,8 +737,8 @@ cassie_sim_t *cassie_sim_init(const char* modelfile, bool reinit)
          -1.1997, 0, 1.4267, 0, -1.5244, 1.5244, -1.5968,
          -0.0045, 0, 0.4973, 0.9786, 0.00386, -0.01524, -0.2051,
          -1.1997, 0, 1.4267, 0, -1.5244, 1.5244, -1.5968};
-    mju_copy_fp(&c->d->qpos[7], qpos_init, 28);
-    mj_forward_fp(c->m, c->d);
+    mju_copy(&c->d->qpos[7], qpos_init, 28);
+    mj_forward(c->m, c->d);
 
     // Intialize systems
     cassie_core_sim_setup(c->core);
@@ -1060,14 +783,14 @@ void cassie_sim_copy(cassie_sim_t *dst, const cassie_sim_t *src)
     CASSIE_COPY_POD(dst, src);
 
     // Copy pointer types
-    mj_copyModel_fp(dst->m, src->m);
+    mj_copyModel(dst->m, src->m);
     CASSIE_SIM_COPY_POINTER(dst, src);
 }
 
 void cassie_sim_copy_just_sim(cassie_sim_t *dst, const cassie_sim_t *src)
 {
     // Copy pointer types
-    mj_copyModel_fp(dst->m, src->m);
+    mj_copyModel(dst->m, src->m);
     CASSIE_SIM_COPY_POINTER(dst, src);
 }
 
@@ -1078,7 +801,7 @@ void cassie_sim_free(cassie_sim_t *c)
 
     // Free pointer elements
     CASSIE_FREE_POINTER(c);
-    mj_deleteModel_fp(c->m);
+    mj_deleteModel(c->m);
 
     // Free cassie_sim_t
     free(c);
@@ -1101,8 +824,8 @@ void cassie_sim_step_ethercat(cassie_sim_t *c,
     // Step the MuJoCo simulation forward
     const int mjsteps = round(5e-4 / c->m->opt.timestep);
     for (int i = 0; i < mjsteps; ++i) {
-        mj_step1_fp(c->m, c->d);
-        mj_step2_fp(c->m, c->d);
+        mj_step1(c->m, c->d);
+        mj_step2(c->m, c->d);
     }
 }
 
@@ -1130,7 +853,7 @@ void cassie_sim_step_pd(cassie_sim_t *c, state_out_t *y, const pd_in_t *u)
 
 void cassie_integrate_pos(cassie_sim_t *c, state_out_t *y)
 {
-    mj_integratePos_fp(c->m, c->d->qpos, c->d->qvel, c->m->opt.timestep);
+    mj_integratePos(c->m, c->d->qpos, c->d->qvel, c->m->opt.timestep);
     // Run state estimator system because why not
     cassie_out_t cassie_out;
     state_output_step(c->estimator, &cassie_out, y);
@@ -1158,7 +881,7 @@ double *cassie_sim_qacc(cassie_sim_t *c)
 
 int cassie_sim_forward(cassie_sim_t *c)
 {
-   mj_forward_fp(c->m, c->d);
+   mj_forward(c->m, c->d);
    return 0;
 }
 
@@ -1179,24 +902,24 @@ double *cassie_sim_ctrl(cassie_sim_t *c)
 
 double* cassie_sim_xpos(cassie_sim_t *c, const char* name)
 {
-    int body_id = mj_name2id_fp(initial_model, mjOBJ_BODY, name);
+    int body_id = mj_name2id(initial_model, mjOBJ_BODY, name);
     return &(c->d->xpos[3*body_id]);
 }
 
 double* cassie_sim_xquat(cassie_sim_t *c, const char* name)
 {
-    int body_id = mj_name2id_fp(c->m, mjOBJ_BODY, name);
+    int body_id = mj_name2id(c->m, mjOBJ_BODY, name);
     return &(c->d->xquat[4*body_id]);
 }
 
 void cassie_sim_get_jacobian(cassie_sim_t *c, double *jac, const char* name)
 {
-    int body_id = mj_name2id_fp(initial_model, mjOBJ_BODY, name);
+    int body_id = mj_name2id(initial_model, mjOBJ_BODY, name);
     double jacp[3][c->m->nv];
     // minimal computations to run to get updated Jacobians
-    mj_kinematics_fp(c->m, c->d);
-    mj_comPos_fp(c->m, c->d);
-    mj_jacBody_fp(c->m, c->d, *jacp, NULL, body_id);
+    mj_kinematics(c->m, c->d);
+    mj_comPos(c->m, c->d);
+    mj_jacBody(c->m, c->d, *jacp, NULL, body_id);
     for(int i=0;i<3;++i){
         for(int j=0;j<c->m->nv;++j){
             jac[i*c->m->nv+j] = jacp[i][j];
@@ -1206,13 +929,13 @@ void cassie_sim_get_jacobian(cassie_sim_t *c, double *jac, const char* name)
 
 void cassie_sim_get_jacobian_full(cassie_sim_t *c, double *jac, double *jac_rot, const char* name)
 {
-    int body_id = mj_name2id_fp(initial_model, mjOBJ_BODY, name);
+    int body_id = mj_name2id(initial_model, mjOBJ_BODY, name);
     double jacp[3][c->m->nv];
     double jacr[3][c->m->nv];
     // minimal computations to run to get updated Jacobians
-    mj_kinematics_fp(c->m, c->d);
-    mj_comPos_fp(c->m, c->d);
-    mj_jacBody_fp(c->m, c->d, *jacp, *jacr, body_id);
+    mj_kinematics(c->m, c->d);
+    mj_comPos(c->m, c->d);
+    mj_jacBody(c->m, c->d, *jacp, *jacr, body_id);
     for(int i=0;i<3;++i){
         for(int j=0;j<c->m->nv;++j){
             jac[i*c->m->nv+j] = jacp[i][j];
@@ -1223,13 +946,13 @@ void cassie_sim_get_jacobian_full(cassie_sim_t *c, double *jac, double *jac_rot,
 
 void cassie_sim_get_jacobian_full_site(cassie_sim_t *c, double *jac, double *jac_rot, const char* name)
 {
-    int body_id = mj_name2id_fp(initial_model, mjOBJ_SITE, name);
+    int body_id = mj_name2id(initial_model, mjOBJ_SITE, name);
     double jacp[3][c->m->nv];
     double jacr[3][c->m->nv];
     // minimal computations to run to get updated Jacobians
-    mj_kinematics_fp(c->m, c->d);
-    mj_comPos_fp(c->m, c->d);
-    mj_jacSite_fp(c->m, c->d, *jacp, *jacr, body_id);
+    mj_kinematics(c->m, c->d);
+    mj_comPos(c->m, c->d);
+    mj_jacSite(c->m, c->d, *jacp, *jacr, body_id);
     for(int i=0;i<3;++i){
         for(int j=0;j<c->m->nv;++j){
             jac[i*c->m->nv+j] = jacp[i][j];
@@ -1240,7 +963,9 @@ void cassie_sim_get_jacobian_full_site(cassie_sim_t *c, double *jac, double *jac
 
 double *cassie_sim_dof_damping(cassie_sim_t *c)
 {
-    return c->m->dof_damping;
+  assert(c);
+  assert(c->m);
+  return c->m->dof_damping;
 }
 
 double *cassie_sim_body_mass(cassie_sim_t *c)
@@ -1281,7 +1006,7 @@ void cassie_sim_set_body_mass(cassie_sim_t *c, double *mass)
 
 void cassie_sim_set_body_name_mass(cassie_sim_t *c, const char* name, double mass)
 {
-    int mass_id = mj_name2id_fp(initial_model, mjOBJ_BODY, name);
+    int mass_id = mj_name2id(initial_model, mjOBJ_BODY, name);
     c->m->body_mass[mass_id] = mass;
 }
 
@@ -1294,13 +1019,13 @@ void cassie_sim_set_body_ipos(cassie_sim_t *c, double *ipos)
 
 void cassie_sim_set_body_name_pos(cassie_sim_t *c, const char* name, double *data)
 {
-    int body_id = mj_name2id_fp(initial_model, mjOBJ_BODY, name);
-    mju_copy_fp(&c->m->body_pos[3*body_id], data, 3);
+    int body_id = mj_name2id(initial_model, mjOBJ_BODY, name);
+    mju_copy(&c->m->body_pos[3*body_id], data, 3);
 }
 
 double* cassie_sim_get_body_name_pos(cassie_sim_t *c, const char* name)
 {
-    int body_id = mj_name2id_fp(initial_model, mjOBJ_BODY, name);
+    int body_id = mj_name2id(initial_model, mjOBJ_BODY, name);
     return &(c->m->body_pos[3*body_id]);
 }
 
@@ -1313,8 +1038,8 @@ void cassie_sim_set_geom_friction(cassie_sim_t *c, double *fric)
 
 void cassie_sim_set_geom_name_friction(cassie_sim_t *c, const char* name, double *fric)
 {
-    int geom_id = mj_name2id_fp(initial_model, mjOBJ_GEOM, name);
-    mju_copy_fp(&c->m->geom_friction[geom_id], fric, 3);
+    int geom_id = mj_name2id(initial_model, mjOBJ_GEOM, name);
+    mju_copy(&c->m->geom_friction[geom_id], fric, 3);
 }
 
 float *cassie_sim_geom_rgba(cassie_sim_t *c)
@@ -1324,7 +1049,7 @@ float *cassie_sim_geom_rgba(cassie_sim_t *c)
 
 float *cassie_sim_geom_name_rgba(cassie_sim_t *c, const char* name)
 {
-    int geom_id = mj_name2id_fp(c->m, mjOBJ_GEOM, name);
+    int geom_id = mj_name2id(c->m, mjOBJ_GEOM, name);
     return &c->m->geom_rgba[4 * geom_id];
 }
 
@@ -1338,7 +1063,7 @@ void cassie_sim_set_geom_rgba(cassie_sim_t *c, float *rgba)
 
 void cassie_sim_set_geom_name_rgba(cassie_sim_t *c, const char* name, float *rgba)
 {
-    int geom_id = mj_name2id_fp(c->m, mjOBJ_GEOM, name);
+    int geom_id = mj_name2id(c->m, mjOBJ_GEOM, name);
     c->m->geom_rgba[4 * geom_id + 0] = rgba[0];
     c->m->geom_rgba[4 * geom_id + 1] = rgba[1];
     c->m->geom_rgba[4 * geom_id + 2] = rgba[2];
@@ -1352,7 +1077,7 @@ double *cassie_sim_geom_quat(cassie_sim_t *c)
 
 double *cassie_sim_geom_name_quat(cassie_sim_t *c, const char* name)
 {
-    int geom_id = mj_name2id_fp(c->m, mjOBJ_GEOM, name);
+    int geom_id = mj_name2id(c->m, mjOBJ_GEOM, name);
     return &c->m->geom_quat[4 * geom_id];
 }
 
@@ -1366,8 +1091,8 @@ void cassie_sim_set_geom_quat(cassie_sim_t *c, double *quat)
 
 void cassie_sim_set_geom_name_quat(cassie_sim_t *c, const char* name, double *quat)
 {
-    int geom_id = mj_name2id_fp(c->m, mjOBJ_GEOM, name);
-    mju_copy_fp(&c->m->geom_quat[4 * geom_id], quat, 4);
+    int geom_id = mj_name2id(c->m, mjOBJ_GEOM, name);
+    mju_copy(&c->m->geom_quat[4 * geom_id], quat, 4);
 }
 
 
@@ -1378,7 +1103,7 @@ double *cassie_sim_geom_pos(cassie_sim_t *c)
 
 double *cassie_sim_geom_name_pos(cassie_sim_t *c, const char* name)
 {
-    int geom_id = mj_name2id_fp(c->m, mjOBJ_GEOM, name);
+    int geom_id = mj_name2id(c->m, mjOBJ_GEOM, name);
     return &c->m->geom_pos[3 * geom_id];
 }
 
@@ -1392,8 +1117,8 @@ void cassie_sim_set_geom_pos(cassie_sim_t *c, double *pos)
 
 void cassie_sim_set_geom_name_pos(cassie_sim_t *c, const char* name, double *pos)
 {
-    int geom_id = mj_name2id_fp(c->m, mjOBJ_GEOM, name);
-    mju_copy_fp(&c->m->geom_pos[3 * geom_id], pos, 3);
+    int geom_id = mj_name2id(c->m, mjOBJ_GEOM, name);
+    mju_copy(&c->m->geom_pos[3 * geom_id], pos, 3);
 }
 
 double *cassie_sim_geom_size(cassie_sim_t *c)
@@ -1403,7 +1128,7 @@ double *cassie_sim_geom_size(cassie_sim_t *c)
 
 double *cassie_sim_geom_name_size(cassie_sim_t *c, const char* name)
 {
-    int geom_id = mj_name2id_fp(c->m, mjOBJ_GEOM, name);
+    int geom_id = mj_name2id(c->m, mjOBJ_GEOM, name);
     return &c->m->geom_size[3 * geom_id];
 }
 
@@ -1417,8 +1142,8 @@ void cassie_sim_set_geom_size(cassie_sim_t *c, double *size)
 
 void cassie_sim_set_geom_name_size(cassie_sim_t *c, const char* name, double *size)
 {
-    int geom_id = mj_name2id_fp(c->m, mjOBJ_GEOM, name);
-    mju_copy_fp(&c->m->geom_size[3 * geom_id], size, 3);
+    int geom_id = mj_name2id(c->m, mjOBJ_GEOM, name);
+    mju_copy(&c->m->geom_size[3 * geom_id], size, 3);
 }
 
 // Get import mujoco model size parameters for the inputted cassie sim stuct.
@@ -1468,9 +1193,9 @@ bool cassie_sim_check_self_collision(const cassie_sim_t *c)
 void cassie_sim_foot_positions(const cassie_sim_t *c, double cpos[6])
 {
     // Zero the output foot positions 
-    mju_zero_fp(cpos, 6);
-    mju_copy_fp(cpos, &c->d->xpos[3 * left_foot_body_id], 3);
-    mju_copy_fp(&cpos[3], &c->d->xpos[3 * right_foot_body_id], 3);
+    mju_zero(cpos, 6);
+    mju_copy(cpos, &c->d->xpos[3 * left_foot_body_id], 3);
+    mju_copy(&cpos[3], &c->d->xpos[3 * right_foot_body_id], 3);
 
     // cassie mechanical model offset
     // double offset_footJoint2midFoot = sqrt(pow((0.052821 + 0.069746)/2, 2) + pow((0.092622 + 0.010224)/2, 2));
@@ -1482,23 +1207,23 @@ void cassie_sim_foot_positions(const cassie_sim_t *c, double cpos[6])
 void cassie_sim_foot_velocities(const cassie_sim_t *c, double cvel[12])
 {
     // Calculate body CoM velocities
-    mj_comVel_fp(c->m, c->d);
+    mj_comVel(c->m, c->d);
     // Zero the output foot velocities 
-    mju_zero_fp(cvel, 12);
-    mju_copy_fp(cvel, &c->d->cvel[6 * left_foot_body_id], 6);
-    mju_copy_fp(&cvel[6], &c->d->cvel[6 * right_foot_body_id], 6);
+    mju_zero(cvel, 12);
+    mju_copy(cvel, &c->d->cvel[6 * left_foot_body_id], 6);
+    mju_copy(&cvel[6], &c->d->cvel[6 * right_foot_body_id], 6);
 }
 
 void cassie_sim_cm_position(const cassie_sim_t *c, double cm_pos[3]){
-    mj_fwdPosition_fp(c->m, c->d);
+    mj_fwdPosition(c->m, c->d);
     for(int i = 0; i < 3; ++i){
         cm_pos[i] = c->d->subtree_com[i];   // Just i because the pelvis is the first body 
     }
 }
 
 void cassie_sim_cm_velocity(const cassie_sim_t *c, double cm_vel[3]){
-    mj_fwdPosition_fp(c->m, c->d);
-    mj_subtreeVel_fp(c->m, c->d);
+    mj_fwdPosition(c->m, c->d);
+    mj_subtreeVel(c->m, c->d);
     for(int i=0; i < 3; ++i){ 
        cm_vel[i] = c->d->subtree_linvel[i]; // Just i because the pelvis is the first body 
     }
@@ -1513,9 +1238,9 @@ void cassie_sim_centroid_inertia(const cassie_sim_t *c, double Icm[9]){
     }
     c->d->qpos[4] = 1;
 
-    mj_fwdPosition_fp(c->m, c->d);
+    mj_fwdPosition(c->m, c->d);
     double fullMassMatrix[c->m->nv*c->m->nv];
-    mj_fullM_fp(c->m, fullMassMatrix, c->d->qM);
+    mj_fullM(c->m, fullMassMatrix, c->d->qM);
 
     double I_p[3][3];
     double I_c[3][3];
@@ -1552,17 +1277,17 @@ void cassie_sim_centroid_inertia(const cassie_sim_t *c, double Icm[9]){
 }
 
 void cassie_sim_angular_momentum(const cassie_sim_t *c, double Lcm[3]){
-    mj_fwdPosition_fp(c->m, c->d);
-    mj_subtreeVel_fp(c->m, c->d);
+    mj_fwdPosition(c->m, c->d);
+    mj_subtreeVel(c->m, c->d);
     for(int i=0; i < 3; ++i){ 
        Lcm[i] = c->d->subtree_angmom[i]; // Just i because the pelvis is the first body 
     }
 }
 
 void cassie_sim_full_mass_matrix(const cassie_sim_t *c, double M[1024]){
-    mj_fwdPosition_fp(c->m, c->d);
+    mj_fwdPosition(c->m, c->d);
     double fullMassMatrix[c->m->nv*c->m->nv];
-    mj_fullM_fp(c->m, fullMassMatrix, c->d->qM);
+    mj_fullM(c->m, fullMassMatrix, c->d->qM);
 
     for(int i=0; i < 32; ++i){
         for(int j=0; j < 32; ++j){
@@ -1573,9 +1298,9 @@ void cassie_sim_full_mass_matrix(const cassie_sim_t *c, double M[1024]){
 
 void cassie_sim_minimal_mass_matrix(const cassie_sim_t *c, double M[256]){
     const int IND[] = {0,1,2,3,4,5,6,7,8,12,18,19,20,21,25,31}; //This is floating base, then the 10 motors in the normal order
-    mj_fwdPosition_fp(c->m, c->d);
+    mj_fwdPosition(c->m, c->d);
     double fullMassMatrix[c->m->nv*c->m->nv];
-    mj_fullM_fp(c->m, fullMassMatrix, c->d->qM);
+    mj_fullM(c->m, fullMassMatrix, c->d->qM);
 
     for(int i=0; i < 16; ++i){
         for(int j=0; j < 16; ++j){
@@ -1585,18 +1310,18 @@ void cassie_sim_minimal_mass_matrix(const cassie_sim_t *c, double M[256]){
 }
 
 void cassie_sim_loop_constraint_info(const cassie_sim_t *c, double J_cl[192], double err_cl[6]){ //32*6 a
-    mj_fwdPosition_fp(c->m, c->d);
+    mj_fwdPosition(c->m, c->d);
 
     int idx_J = 0;
 
     for(int i = 0; i < c->d->nefc; ++i){
-        // mj_id2name_fp(c->m, 15, c->d->efc_id[i])
+        // mj_id2name(c->m, 15, c->d->efc_id[i])
 
-        // printf("Row: %i    Type: %i   efc_id: %d    efc_name:%s\n", i, c->d->efc_type[i], c->d->efc_id[i], mj_id2name_fp(c->m, 16, c->d->efc_id[i]));
+        // printf("Row: %i    Type: %i   efc_id: %d    efc_name:%s\n", i, c->d->efc_type[i], c->d->efc_id[i], mj_id2name(c->m, 16, c->d->efc_id[i]));
         // std::cout << d->efc_type[i] << std::endl;
         if(c->d->efc_type[i] == 0 && (          // 0 is mjCNSTR_EQUALITY, I don't want to import mujoco constants
-            strcmp(mj_id2name_fp(c->m, 16, c->d->efc_id[i]), "left-achilles-rod-eq") == 0 || 
-            strcmp(mj_id2name_fp(c->m, 16, c->d->efc_id[i]), "right-achilles-rod-eq") == 0)){
+            strcmp(mj_id2name(c->m, 16, c->d->efc_id[i]), "left-achilles-rod-eq") == 0 || 
+            strcmp(mj_id2name(c->m, 16, c->d->efc_id[i]), "right-achilles-rod-eq") == 0)){
 
             // std::cout << J_eq.rows() << " " << J_eq.cols() << std::endl; //12x32 non contact
             for(int j = 0; j < 32; ++j){
@@ -1612,19 +1337,19 @@ void cassie_sim_loop_constraint_info(const cassie_sim_t *c, double J_cl[192], do
 void cassie_sim_body_velocities(const cassie_sim_t *c, double cvel[6], const char* name)
 {
     // Calculate body CoM velocities
-    mj_comVel_fp(c->m, c->d);
+    mj_comVel(c->m, c->d);
     // Zero the output foot velocities 
-    mju_zero_fp(cvel, 6);
-    int body_id = mj_name2id_fp(c->m, mjOBJ_BODY, name);
-    mju_copy_fp(cvel, &c->d->cvel[6 * body_id], 6);
+    mju_zero(cvel, 6);
+    int body_id = mj_name2id(c->m, mjOBJ_BODY, name);
+    mju_copy(cvel, &c->d->cvel[6 * body_id], 6);
 }
 
 void cassie_sim_foot_orient(const cassie_sim_t *c, double corient[4])
 {
-    int right_id = mj_name2id_fp(c->m, mjOBJ_SITE, "right-foot-middle");
+    int right_id = mj_name2id(c->m, mjOBJ_SITE, "right-foot-middle");
     double right_rot_mat[9];
-    mju_copy_fp(right_rot_mat, &c->d->site_xmat[9 * right_id], 9);
-    mju_mat2Quat_fp(corient, right_rot_mat);
+    mju_copy(right_rot_mat, &c->d->site_xmat[9 * right_id], 9);
+    mju_mat2Quat(corient, right_rot_mat);
 }
 
 void cassie_sim_foot_forces(const cassie_sim_t *c, double cfrc[12])
@@ -1633,7 +1358,7 @@ void cassie_sim_foot_forces(const cassie_sim_t *c, double cfrc[12])
     double force_global[3];
 
     // Zero the output foot forces
-    mju_zero_fp(cfrc, 12);
+    mju_zero(cfrc, 12);
 
     // Accumulate the forces on each foot
     for (int i = 0; i < c->d->ncon; ++i) {
@@ -1644,8 +1369,8 @@ void cassie_sim_foot_forces(const cassie_sim_t *c, double cfrc[12])
         // Left foot
         if (body1 == left_foot_body_id || body2 == left_foot_body_id) {
             // Get contact force in world coordinates
-            mj_contactForce_fp(c->m, c->d, i, force_torque);
-            mju_rotVecMatT_fp(force_global, force_torque,
+            mj_contactForce(c->m, c->d, i, force_torque);
+            mju_rotVecMatT(force_global, force_torque,
                              c->d->contact[i].frame);
 
             // Add to total forces on foot
@@ -1658,8 +1383,8 @@ void cassie_sim_foot_forces(const cassie_sim_t *c, double cfrc[12])
         // Right foot
         if (body1 == right_foot_body_id || body2 == right_foot_body_id) {
             // Get contact force in world coordinates
-            mj_contactForce_fp(c->m, c->d, i, force_torque);
-            mju_rotVecMatT_fp(force_global, force_torque,
+            mj_contactForce(c->m, c->d, i, force_torque);
+            mju_rotVecMatT(force_global, force_torque,
                              c->d->contact[i].frame);
 
             // Add to total forces on foot
@@ -1677,8 +1402,8 @@ void cassie_sim_heeltoe_forces(const cassie_sim_t *c, double toe_force[6], doubl
     double force_global[3];
 
     // Zero the output foot forces
-    mju_zero_fp(toe_force, 6);
-    mju_zero_fp(heel_force, 6);
+    mju_zero(toe_force, 6);
+    mju_zero(heel_force, 6);
     int heel_ids[2] = {left_heel_id, right_heel_id};
     int toe_ids[2] = {left_toe_id, right_toe_id};
 
@@ -1700,8 +1425,8 @@ void cassie_sim_heeltoe_forces(const cassie_sim_t *c, double toe_force[6], doubl
                 id_ind = 1;
             }
             // Get contact force in world coordinates
-            mj_contactForce_fp(c->m, c->d, i, force_torque);
-            mju_rotVecMatT_fp(force_global, force_torque,
+            mj_contactForce(c->m, c->d, i, force_torque);
+            mju_rotVecMatT(force_global, force_torque,
                              c->d->contact[i].frame);
             
             double toe_dist[2] = {c->d->site_xpos[3*toe_ids[id_ind]]-c->d->contact[i].pos[0], c->d->site_xpos[3*toe_ids[id_ind]+1]-c->d->contact[i].pos[1]};
@@ -1721,7 +1446,7 @@ void cassie_vis_foot_forces(const cassie_vis_t *c, double cfrc[12])
     double force_global[3];
 
     // Zero the output foot forces
-    mju_zero_fp(cfrc, 12);
+    mju_zero(cfrc, 12);
 
     // Accumulate the forces on each foot
     for (int i = 0; i < c->d->ncon; ++i) {
@@ -1732,8 +1457,8 @@ void cassie_vis_foot_forces(const cassie_vis_t *c, double cfrc[12])
         // Left foot
         if (body1 == left_foot_body_id || body2 == left_foot_body_id) {
             // Get contact force in world coordinates
-            mj_contactForce_fp(c->m, c->d, i, force_torque);
-            mju_rotVecMatT_fp(force_global, force_torque,
+            mj_contactForce(c->m, c->d, i, force_torque);
+            mju_rotVecMatT(force_global, force_torque,
                              c->d->contact[i].frame);
 
             // Add to total forces on foot
@@ -1746,8 +1471,8 @@ void cassie_vis_foot_forces(const cassie_vis_t *c, double cfrc[12])
         // Right foot
         if (body1 == right_foot_body_id || body2 == right_foot_body_id) {
             // Get contact force in world coordinates
-            mj_contactForce_fp(c->m, c->d, i, force_torque);
-            mju_rotVecMatT_fp(force_global, force_torque,
+            mj_contactForce(c->m, c->d, i, force_torque);
+            mju_rotVecMatT(force_global, force_torque,
                              c->d->contact[i].frame);
 
             // Add to total forces on foot
@@ -1761,13 +1486,13 @@ void cassie_vis_foot_forces(const cassie_vis_t *c, double cfrc[12])
 
 void cassie_sim_apply_force(cassie_sim_t *c, double xfrc[6], const char* name)
 {
-    int body_id = mj_name2id_fp(c->m, mjOBJ_BODY, name);
-    mju_copy_fp(&c->d->xfrc_applied[6 * body_id], xfrc, 6);
+    int body_id = mj_name2id(c->m, mjOBJ_BODY, name);
+    mju_copy(&c->d->xfrc_applied[6 * body_id], xfrc, 6);
 }
 
 void cassie_sim_clear_forces(cassie_sim_t *c)
 {
-    mju_zero_fp(c->d->xfrc_applied, 6 * c->m->nbody);
+    mju_zero(c->d->xfrc_applied, 6 * c->m->nbody);
 }
 
 void cassie_sim_hold(cassie_sim_t *c)
@@ -1816,12 +1541,12 @@ void cassie_sim_full_reset(cassie_sim_t *c)
     memset(ctrl_zero, 0, c->m->nu*sizeof(double));
     double xfrc_zero[c->m->nbody*6];
     memset(xfrc_zero, 0, c->m->nbody*sizeof(double));
-    mju_copy_fp(c->d->qpos, qpos_init, 35);
-    mju_zero_fp(c->d->qvel, c->m->nv);
-    mju_zero_fp(c->d->ctrl, c->m->nu);
-    mju_zero_fp(c->d->qfrc_applied, c->m->nv);
-    mju_zero_fp(c->d->xfrc_applied, 6 * c->m->nbody);
-    mju_zero_fp(c->d->qacc, c->m->nv);
+    mju_copy(c->d->qpos, qpos_init, 35);
+    mju_zero(c->d->qvel, c->m->nv);
+    mju_zero(c->d->ctrl, c->m->nu);
+    mju_zero(c->d->qfrc_applied, c->m->nv);
+    mju_zero(c->d->xfrc_applied, 6 * c->m->nbody);
+    mju_zero(c->d->qacc, c->m->nv);
 
     for(int i = 0; i < TORQUE_DELAY_CYCLES; i++) {
         for (int j = 0; j < NUM_DRIVES; j++) {
@@ -1864,7 +1589,7 @@ void cassie_sim_set_hfielddata(cassie_sim_t *c, float* data) {
 }
 
 void cassie_sim_copy_mjd(cassie_sim_t *dest, cassie_sim_t *src) {
-    mj_copyData_fp(dest->d, src->m, src->d);
+    mj_copyData(dest->d, src->m, src->d);
 }
 
 void cassie_sim_copy_state_est(cassie_sim_t *dest, cassie_sim_t *src) {
@@ -1977,18 +1702,18 @@ void cassie_sim_set_torque_delay(cassie_sim_t *c, double* t) {
 
 void cassie_vis_full_reset(cassie_vis_t *v)
 {
-    mjv_freeScene_fp(&v->scn);
-    mjr_freeContext_fp(&v->con);
+    mjv_freeScene(&v->scn);
+    mjr_freeContext(&v->con);
 
-    mjr_defaultContext_fp(&v->con);
-    mjv_defaultScene_fp(&v->scn);
-    mjv_makeScene_fp(v->m, &v->scn, 1000);
-    mjr_makeContext_fp(v->m, &v->con, fontscale);
+    mjr_defaultContext(&v->con);
+    mjv_defaultScene(&v->scn);
+    mjv_makeScene(v->m, &v->scn, 1000);
+    mjr_makeContext(v->m, &v->con, fontscale);
 }
 
 void cassie_vis_remakeSceneCon(cassie_vis_t *v) {
-    mjv_makeScene_fp(v->m, &v->scn, 1000);
-    mjr_makeContext_fp(v->m, &v->con, fontscale);
+    mjv_makeScene(v->m, &v->scn, 1000);
+    mjr_makeContext(v->m, &v->con, fontscale);
 }
 
 // add markers to visualization
@@ -2122,9 +1847,9 @@ void cassie_vis_update_marker_orient(cassie_vis_t* v, int id, double so3[9])
 
 void cassie_vis_apply_force(cassie_vis_t *v, double xfrc[6], const char* name)
 {
-    int body_id = mj_name2id_fp(v->m, mjOBJ_BODY, name);
+    int body_id = mj_name2id(v->m, mjOBJ_BODY, name);
     v->perturb_body = body_id;
-    mju_copy_fp(v->perturb_force, xfrc, 6);
+    mju_copy(v->perturb_force, xfrc, 6);
 }
 
 void cassie_vis_init_recording(cassie_vis_t *sim, const char* videofile, int width, int height){
@@ -2147,7 +1872,7 @@ void cassie_vis_init_recording(cassie_vis_t *sim, const char* videofile, int wid
 
     sim->video_width = width;
     sim->video_height = height;
-    glfwSetWindowSize_fp(sim->window, width, height);
+    glfwSetWindowSize(sim->window, width, height);
     sim->frame = (unsigned char*)malloc(3*width*height);
 
     sim->pipe_video_out = popen(ffmpeg_cmd, "w"); 
@@ -2159,20 +1884,20 @@ void cassie_vis_record_frame(cassie_vis_t *sim){
 
     mjrRect viewport = {0, 0, 0, 0};
 
-    glfwGetFramebufferSize_fp(sim->window, &viewport.width, &viewport.height);
+    glfwGetFramebufferSize(sim->window, &viewport.width, &viewport.height);
 
     // This checks if the window is resized and loops until it is released and corrected
     if(viewport.width != sim->video_width || viewport.height != sim->video_height){
         while(viewport.width != sim->video_width || viewport.height != sim->video_height){
-            glfwSetWindowSize_fp(sim->window, sim->video_width, sim->video_height);
-            glfwGetFramebufferSize_fp(sim->window, &viewport.width, &viewport.height);
+            glfwSetWindowSize(sim->window, sim->video_width, sim->video_height);
+            glfwGetFramebufferSize(sim->window, &viewport.width, &viewport.height);
             usleep(10000);
             if(!sim || !sim->window)
                 return;
         }
     }
     else{ //Normal case where the right size so it can render to file
-        mjr_readPixels_fp(sim->frame, NULL, viewport, &sim->con);
+        mjr_readPixels(sim->frame, NULL, viewport, &sim->con);
         //Write frame to output pipe
         fwrite(sim->frame, 1, sim->video_width*sim->video_height*3, sim->pipe_video_out);
     }
@@ -2190,13 +1915,13 @@ void cassie_vis_close_recording(cassie_vis_t *sim){
 void scroll(GLFWwindow* window, double xoffset, double yoffset)
 {
     (void)xoffset;
-    cassie_vis_t* v = glfwGetWindowUserPointer_fp(window);
+    cassie_vis_t* v = glfwGetWindowUserPointer(window);
     // scroll: emulate vertical mouse motion = 5% of window height
-    mjv_moveCamera_fp(v->m, mjMOUSE_ZOOM, 0.0, -0.05 * yoffset, &v->scn, &v->cam);
+    mjv_moveCamera(v->m, mjMOUSE_ZOOM, 0.0, -0.05 * yoffset, &v->scn, &v->cam);
 }
 
 void mouse_move(GLFWwindow* w, double xpos, double ypos) {
-    cassie_vis_t* v = glfwGetWindowUserPointer_fp(w);
+    cassie_vis_t* v = glfwGetWindowUserPointer(w);
 
     // no buttons down: nothing to do
     if (!v->button_left && !v->button_middle && !v->button_right) {
@@ -2211,9 +1936,9 @@ void mouse_move(GLFWwindow* w, double xpos, double ypos) {
 
     int width;
     int height;
-    glfwGetWindowSize_fp(w, &width, &height);
+    glfwGetWindowSize(w, &width, &height);
 
-    int mod_shift = glfwGetKey_fp(w, GLFW_KEY_LEFT_SHIFT) || glfwGetKey_fp(w, GLFW_KEY_RIGHT_SHIFT);
+    int mod_shift = glfwGetKey(w, GLFW_KEY_LEFT_SHIFT) || glfwGetKey(w, GLFW_KEY_RIGHT_SHIFT);
 
     // determine action based on mouse button
     int action = mjMOUSE_ZOOM;
@@ -2227,19 +1952,19 @@ void mouse_move(GLFWwindow* w, double xpos, double ypos) {
     mjtNum xchange = dx / height;
     mjtNum ychange = dy / height;
     if (v->pert.active != 0) {
-        mjv_movePerturb_fp(v->m, v->d, action, xchange, ychange, &v->scn, &v->pert);
+        mjv_movePerturb(v->m, v->d, action, xchange, ychange, &v->scn, &v->pert);
     } else {
-        mjv_moveCamera_fp(v->m, action, xchange, ychange, &v->scn, &v->cam);
+        mjv_moveCamera(v->m, action, xchange, ychange, &v->scn, &v->cam);
     }
 }
 
 // past data for double-click detection
 void mouse_button(GLFWwindow* window, int button, int act, int mods) {
-    cassie_vis_t* v = glfwGetWindowUserPointer_fp(window);
+    cassie_vis_t* v = glfwGetWindowUserPointer(window);
     // update button state
-    v->button_left = glfwGetMouseButton_fp(window, GLFW_MOUSE_BUTTON_LEFT);
-    v->button_middle = glfwGetMouseButton_fp(window, GLFW_MOUSE_BUTTON_MIDDLE);
-    v->button_right = glfwGetMouseButton_fp(window, GLFW_MOUSE_BUTTON_RIGHT);
+    v->button_left = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT);
+    v->button_middle = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_MIDDLE);
+    v->button_right = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT);
 
     // Alt: swap left and right
     if (mods == GLFW_MOD_ALT) {
@@ -2256,7 +1981,7 @@ void mouse_button(GLFWwindow* window, int button, int act, int mods) {
 
     // update mouse position
     double x, y;
-    glfwGetCursorPos_fp(window, &x, &y);
+    glfwGetCursorPos(window, &x, &y);
     v->lastx = x;
     v->lasty = y;
 
@@ -2274,7 +1999,7 @@ void mouse_button(GLFWwindow* window, int button, int act, int mods) {
             }
             // perturbation onset: reset reference
             if (newperturb > 0 && v->pert.active == 0) {
-                mjv_initPerturb_fp(v->m, v->d, &v->scn, &v->pert);
+                mjv_initPerturb(v->m, v->d, &v->scn, &v->pert);
             }
         } else {
             // Enable vis perturb force again
@@ -2295,7 +2020,7 @@ void mouse_button(GLFWwindow* window, int button, int act, int mods) {
         }
         // get current window size
         int width, height;
-        glfwGetWindowSize_fp(window, &width, &height);
+        glfwGetWindowSize(window, &width, &height);
         // find geom and 3D click point, get corresponding body
         mjtNum selpnt[3];
 
@@ -2305,7 +2030,7 @@ void mouse_button(GLFWwindow* window, int button, int act, int mods) {
         mjtNum relx = (mjtNum) x / width;
         mjtNum rely = (mjtNum) (height - y) / height;
 
-        int selbody = mjv_select_fp(v->m, v->d, &v->opt,
+        int selbody = mjv_select(v->m, v->d, &v->opt,
                             aspectratio, relx,
                             rely, 
                             &v->scn, selpnt, &selgeom, &selskin);
@@ -2327,8 +2052,8 @@ void mouse_button(GLFWwindow* window, int button, int act, int mods) {
             if (selbody >= 0) {
                 // compute localpos
                 mjtNum tmp[3];
-                mju_sub3_fp(tmp, selpnt, v->d->qpos+3*selbody);
-                mju_mulMatTVec_fp(v->pert.localpos, v->d->xmat+9*selbody, tmp, 3, 3);
+                mju_sub3(tmp, selpnt, v->d->qpos+3*selbody);
+                mju_mulMatTVec(v->pert.localpos, v->d->xmat+9*selbody, tmp, 3, 3);
 
                 // record selection
                 v->pert.select = selbody;
@@ -2348,14 +2073,14 @@ void mouse_button(GLFWwindow* window, int button, int act, int mods) {
         v->lastclicktm = time(0);
     } else {
         // If mouse not pressed, not applying perturb so zero it out.
-        mju_zero_fp(v->d->xfrc_applied, 6 * v->m->nbody);
+        mju_zero(v->d->xfrc_applied, 6 * v->m->nbody);
     }
     
 }
 
 void cassie_vis_set_cam(cassie_vis_t* v, const char* body_name, double zoom, double azi, double elev)
 {
-    int body_id = mj_name2id_fp(initial_model, mjOBJ_BODY, body_name);
+    int body_id = mj_name2id(initial_model, mjOBJ_BODY, body_name);
     v->cam.type = mjCAMERA_TRACKING;
     v->cam.trackbodyid = body_id;
     v->cam.fixedcamid = -1;
@@ -2365,7 +2090,7 @@ void cassie_vis_set_cam(cassie_vis_t* v, const char* body_name, double zoom, dou
 }
 
 void cassie_vis_attach_cam(cassie_vis_t* v, const char* cam_name){
-    int cam_id = mj_name2id_fp(initial_model, mjOBJ_CAMERA, cam_name);
+    int cam_id = mj_name2id(initial_model, mjOBJ_CAMERA, cam_name);
     v->cam.type = mjCAMERA_FIXED;
     v->cam.fixedcamid = cam_id;
     v->cam.lookat[0] = initial_model->stat.center[0];
@@ -2394,14 +2119,14 @@ float cassie_vis_zfar(cassie_vis_t* v)
 
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
     (void)scancode;
-    cassie_vis_t* v = glfwGetWindowUserPointer_fp(window);
+    cassie_vis_t* v = glfwGetWindowUserPointer(window);
     if (action == GLFW_RELEASE) {
         return;
     } else if (action == GLFW_PRESS) {
         if (key == GLFW_KEY_P && mods == 0) {
             printf("attaching camera to pelvis\n");
             v->cam.type = mjCAMERA_TRACKING;
-            int pel_id = mj_name2id_fp(v->m, mjOBJ_BODY, "cassie-pelvis");
+            int pel_id = mj_name2id(v->m, mjOBJ_BODY, "cassie-pelvis");
             v->cam.trackbodyid = pel_id;
             v->cam.fixedcamid = -1;
             v->cam.distance = 3;
@@ -2424,9 +2149,9 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
                     }
                 }
                 printf("\n");
-                // mju_printMat_fp(v->d->qpos, v->m->nq, 1);
+                // mju_printMat(v->d->qpos, v->m->nq, 1);
             } else if (key == GLFW_KEY_Q) {
-                glfwSetWindowShouldClose_fp(window, true);
+                glfwSetWindowShouldClose(window, true);
             }
         }
         // toggle visualiztion flag
@@ -2486,7 +2211,7 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
             } break;
             case GLFW_KEY_F5: {     // toggle fullscreen
                 v->showfullscreen = !v->showfullscreen;
-                v->showfullscreen ? glfwMaximizeWindow_fp(window) : glfwRestoreWindow_fp(window);
+                v->showfullscreen ? glfwMaximizeWindow(window) : glfwRestoreWindow(window);
             } break;
             case GLFW_KEY_F7: {     // sensor figure
                 v->showsensor = !v->showsensor;
@@ -2506,28 +2231,28 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
                     -1.1997, 0, 1.4267, 0, -1.5244, 1.5244, -1.5968,
                     -0.0045, 0, 0.4973, 0.9786, 0.00386, -0.01524, -0.2051,
                     -1.1997, 0, 1.4267, 0, -1.5244, 1.5244, -1.5968};
-                mj_resetData_fp(v->m, v->d);
-                mju_copy_fp(v->d->qpos, qpos_init, 35);
+                mj_resetData(v->m, v->d);
+                mju_copy(v->d->qpos, qpos_init, 35);
                 v->d->time = 0.0;
-                mj_forward_fp(v->m, v->d);
+                mj_forward(v->m, v->d);
             } break;
             case GLFW_KEY_RIGHT: {      // step forward
                 if (v->paused) {
-                    mj_step_fp(v->m, v->d);
+                    mj_step(v->m, v->d);
                 }
             } break;
             // case GLFW_KEY_LEFT: {       // step backward
             //     if (v->paused) {
             //         double dt = v->m->opt.timestep;
             //         v->m->opt.timestep = -dt;
-            //         mj_step_fp(v->m, v->d);
+            //         mj_step(v->m, v->d);
             //         v->m->opt.timestep = dt;
             //     }
             // } break;
             case GLFW_KEY_DOWN: {      // step forward 100
                 if (v->paused) {
                     for (int i = 0; i < 100; i++) {
-                        mj_step_fp(v->m, v->d);
+                        mj_step(v->m, v->d);
                     }
                 }
             } break;
@@ -2536,7 +2261,7 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
             //         double dt = v->m->opt.timestep;
             //         v->m->opt.timestep = -dt;
             //         for (int i = 0; i < 100; i++) {
-            //             mj_step_fp(v->m, v->d);
+            //             mj_step(v->m, v->d);
             //         }
             //         v->m->opt.timestep = dt;
             //     }
@@ -2547,13 +2272,13 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
             case GLFW_KEY_EQUAL: {      // bigger font
                 if (fontscale < 200) {
                     fontscale += 50;
-                    mjr_makeContext_fp(v->m, &v->con, fontscale);
+                    mjr_makeContext(v->m, &v->con, fontscale);
                 }
             } break;
             case GLFW_KEY_MINUS: {      // smaller font
                 if (fontscale > 100) {
                     fontscale -= 50;
-                    mjr_makeContext_fp(v->m, &v->con, fontscale);
+                    mjr_makeContext(v->m, &v->con, fontscale);
                 }
             } break;
             case GLFW_KEY_LEFT_BRACKET: {  // '[' previous fixed camera or free
@@ -2584,7 +2309,7 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 }
 
 void sensorinit(cassie_vis_t *v) {
-    mjv_defaultFigure_fp(&v->figsensor);
+    mjv_defaultFigure(&v->figsensor);
     v->figsensor.figurergba[3] = 0.5f;
 
     // Set flags
@@ -2669,11 +2394,11 @@ void sensorshow(cassie_vis_t* v, mjrRect rect) {
         width, 
         rect.height/3
     };
-    mjr_figure_fp(viewport, &v->figsensor, &v->con);
+    mjr_figure(viewport, &v->figsensor, &v->con);
 }
 
 void grfinit(cassie_vis_t *v) {
-    mjv_defaultFigure_fp(&v->figGRF);
+    mjv_defaultFigure(&v->figGRF);
     v->figGRF.figurergba[3] = 0.5f;
 
     // Set flags
@@ -2738,7 +2463,7 @@ void grfshow(cassie_vis_t* v, mjrRect rect) {
         rect.height/2
     };
 
-    mjr_figure_fp(viewport, &v->figGRF, &v->con);
+    mjr_figure(viewport, &v->figGRF, &v->con);
 }
 
 cassie_vis_t *cassie_vis_init(cassie_sim_t* c, const char* modelfile, bool offscreen) {
@@ -2765,8 +2490,8 @@ cassie_vis_t *cassie_vis_init(cassie_sim_t* c, const char* modelfile, bool offsc
     v->button_right = false;
     v->lastbutton = GLFW_MOUSE_BUTTON_1;
     v->lastclicktm = 0.0;
-    // GLFWvidmode* vidmode = glfwGetVideoMode_fp(glfwGetPrimaryMonitor_fp());
-    v->refreshrate = glfwGetVideoMode_fp(glfwGetPrimaryMonitor_fp())->refreshRate;
+    // GLFWvidmode* vidmode = glfwGetVideoMode(glfwGetPrimaryMonitor());
+    v->refreshrate = glfwGetVideoMode(glfwGetPrimaryMonitor())->refreshRate;
     v->showhelp = 0;
     v->showoption = false;
     v->showGRF = false;
@@ -2788,34 +2513,34 @@ cassie_vis_t *cassie_vis_init(cassie_sim_t* c, const char* modelfile, bool offsc
     // Create window
     if(offscreen)
     {
-        glfwWindowHint_fp(GLFW_VISIBLE, GLFW_FALSE);
+        glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     }
-    v->window = glfwCreateWindow_fp(1200, 900, "Cassie", NULL, NULL);
-    glfwMakeContextCurrent_fp(v->window);
-    glfwSwapInterval_fp(0);
+    v->window = glfwCreateWindow(1200, 900, "Cassie", NULL, NULL);
+    glfwMakeContextCurrent(v->window);
+    glfwSwapInterval(0);
 
     sensorinit(v);
     grfinit(v);
     // Set up mujoco visualization objects
     // v->cam.type = mjCAMERA_FIXED;
     // v->cam.fixedcamid = 0;
-    mjv_defaultCamera_fp(&v->cam);
-    mjv_defaultOption_fp(&v->opt);
+    mjv_defaultCamera(&v->cam);
+    mjv_defaultOption(&v->opt);
     v->opt.flags[11] = 1;//v->opt.flags[12];    // Render applied forces
-    mjr_defaultContext_fp(&v->con);
-    mjv_defaultScene_fp(&v->scn);
-    mjv_makeScene_fp(c->m, &v->scn, 1000);
-    mjr_makeContext_fp(c->m, &v->con, fontscale);
+    mjr_defaultContext(&v->con);
+    mjv_defaultScene(&v->scn);
+    mjv_makeScene(c->m, &v->scn, 1000);
+    mjr_makeContext(c->m, &v->con, fontscale);
 
     // Set callback for user-initiated window close events
-    glfwSetWindowUserPointer_fp(v->window, v);
-    glfwSetWindowCloseCallback_fp(v->window, window_close_callback);
+    glfwSetWindowUserPointer(v->window, v);
+    glfwSetWindowCloseCallback(v->window, window_close_callback);
 
     // Set glfw callbacks
-    glfwSetCursorPosCallback_fp(v->window, mouse_move);
-    glfwSetMouseButtonCallback_fp(v->window, mouse_button);
-    glfwSetScrollCallback_fp(v->window, scroll);
-    glfwSetKeyCallback_fp(v->window, key_callback);
+    glfwSetCursorPosCallback(v->window, mouse_move);
+    glfwSetMouseButtonCallback(v->window, mouse_button);
+    glfwSetScrollCallback(v->window, scroll);
+    glfwSetKeyCallback(v->window, key_callback);
 
     v->depth_raw = NULL; //set to null here if not use depth at all
 
@@ -2845,10 +2570,10 @@ float* cassie_vis_draw_depth(cassie_vis_t *v, cassie_sim_t *c, int width, int he
     }
 
     mjrRect viewport={0,0,width,height};
-    glfwMakeContextCurrent_fp(v->window);
-    mjv_updateScene_fp(c->m, c->d, &v->opt, &v->pert, &v->cam, mjCAT_ALL, &v->scn);
-    mjr_render_fp(viewport, &v->scn, &v->con);
-    mjr_readPixels_fp(NULL, v->depth_raw, viewport, &v->con);
+    glfwMakeContextCurrent(v->window);
+    mjv_updateScene(c->m, c->d, &v->opt, &v->pert, &v->cam, mjCAT_ALL, &v->scn);
+    mjr_render(viewport, &v->scn, &v->con);
+    mjr_readPixels(NULL, v->depth_raw, viewport, &v->con);
     return v->depth_raw;
 }
 
@@ -2865,11 +2590,11 @@ void cassie_vis_close(cassie_vis_t *v)
     // Free mujoco objects
     // Cannot free context here in case there are multiple windows open
     // Context is freed in vis_free
-    mjv_freeScene_fp(&v->scn);
-    // mjr_freeContext_fp(&v->con);
+    mjv_freeScene(&v->scn);
+    // mjr_freeContext(&v->con);
 
     // Close window
-    glfwDestroyWindow_fp(v->window);
+    glfwDestroyWindow(v->window);
     v->window = NULL;
 
     if(v->pipe_video_out){
@@ -2891,7 +2616,7 @@ void cassie_vis_free(cassie_vis_t *v)
     }
 
     // Free cassie_vis_t
-    mjr_freeContext_fp(&v->con);
+    mjr_freeContext(&v->con);
     free(v);
 }
 
@@ -2957,40 +2682,40 @@ bool cassie_vis_draw(cassie_vis_t *v, cassie_sim_t *c)
     }
 
     // Check if window should be closed
-    if (glfwWindowShouldClose_fp(v->window)) {
+    if (glfwWindowShouldClose(v->window)) {
         cassie_vis_close(v);
         return false;
     }
     // If we are rendering to file then force the window to be the right size
     if( v->pipe_video_out != NULL){
-        glfwSetWindowSize_fp(v->window, v->video_width, v->video_height);
+        glfwSetWindowSize(v->window, v->video_width, v->video_height);
     }
     // clear old perturbations, apply new
-    // mju_zero_fp(v->d->xfrc_applied, 6 * v->m->nbody);
+    // mju_zero(v->d->xfrc_applied, 6 * v->m->nbody);
     if (v->pert.select > 0) {
-       mjv_applyPerturbPose_fp(v->m, v->d, &v->pert, 0); // move mocap bodies only
-       mjv_applyPerturbForce_fp(v->m, v->d, &v->pert);
+       mjv_applyPerturbPose(v->m, v->d, &v->pert, 0); // move mocap bodies only
+       mjv_applyPerturbForce(v->m, v->d, &v->pert);
     }
     // Add applied forces to qfrc array
     for (int i = 0; i < 6; i++) {
         v->d->xfrc_applied[6*v->perturb_body + i] += v->perturb_force[i];
     }
-    mj_forward_fp(v->m, v->d);
+    mj_forward(v->m, v->d);
     // Reset xfrc applied to zero
     memset(v->perturb_force, 0, 6*sizeof(double));
     // Set up for rendering
-    glfwMakeContextCurrent_fp(v->window);
+    glfwMakeContextCurrent(v->window);
     mjrRect viewport = {0, 0, 0, 0};
-    glfwGetFramebufferSize_fp(v->window, &viewport.width, &viewport.height);
+    glfwGetFramebufferSize(v->window, &viewport.width, &viewport.height);
     mjrRect smallrect = viewport;
     // Render scene
-    mjv_updateScene_fp(c->m, c->d, &v->opt, &v->pert, &v->cam, mjCAT_ALL, &v->scn);
+    mjv_updateScene(c->m, c->d, &v->opt, &v->pert, &v->cam, mjCAT_ALL, &v->scn);
 
     // Add markers (custom geoms) at end of populated geom list
     add_vis_markers(v);
 
     // render
-    mjr_render_fp(viewport, &v->scn, &v->con);
+    mjr_render(viewport, &v->scn, &v->con);
 
     if (v->showsensor) {
         if (!v->paused) {
@@ -3005,7 +2730,7 @@ bool cassie_vis_draw(cassie_vis_t *v, cassie_sim_t *c)
         grfshow(v, smallrect);
     }
     if (v->showhelp) {
-        mjr_overlay_fp(mjFONT_NORMAL, mjGRID_TOPLEFT, viewport, help_title, help_content, &v->con);
+        mjr_overlay(mjFONT_NORMAL, mjGRID_TOPLEFT, viewport, help_title, help_content, &v->con);
     }
     if (v->showinfo) {
         char buf[1024];
@@ -3028,16 +2753,16 @@ bool cassie_vis_draw(cassie_vis_t *v, cassie_sim_t *c)
         strcat(buf, status);
         // status = str_slow * status
 
-        mjr_overlay_fp(mjFONT_NORMAL, mjGRID_BOTTOMLEFT, viewport,
+        mjr_overlay(mjFONT_NORMAL, mjGRID_BOTTOMLEFT, viewport,
                     str_paused,
                     buf, &v->con);
     }
 
     // Show updated scene
-    glfwSwapBuffers_fp(v->window);
-    glfwPollEvents_fp();
+    glfwSwapBuffers(v->window);
+    glfwPollEvents();
 
-    return true;//glfwWindowShouldClose_fp(v->window);
+    return true;//glfwWindowShouldClose(v->window);
 }
 
 bool cassie_vis_valid(cassie_vis_t *v)
@@ -3059,7 +2784,7 @@ bool cassie_vis_slowmo(cassie_vis_t *v)
 }
 
 void cassie_vis_window_resize(cassie_vis_t *v, int width, int height) {
-    glfwSetWindowSize_fp(v->window, width, height);
+    glfwSetWindowSize(v->window, width, height);
 }
 
 cassie_state_t *cassie_state_alloc()

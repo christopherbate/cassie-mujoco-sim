@@ -64,11 +64,12 @@ int main(int argc, char *argv[])
     bool hold = false;
     char *log_file_path = NULL;
     char *qlog_file_path = NULL;
+    const char *modelfile = NULL;
     int mode = MODE_STANDARD;
 
     // Parse arguments
     int c;
-    while ((c = getopt(argc, argv, "a:p:rvhl:q:x")) != -1) {
+    while ((c = getopt(argc, argv, "a:p:rvhl:q:xf:")) != -1) {
         switch (c) {
         case 'a':
             // Inteface address to bind
@@ -102,6 +103,9 @@ int main(int argc, char *argv[])
             // Run in PD mode
             mode = MODE_PD;
             break;
+        case 'f':
+          modelfile = optarg;
+          break;
         default:
             // Print usage
             printf(
@@ -169,7 +173,7 @@ int main(int argc, char *argv[])
     socklen_t addrlen = sizeof src_addr;
 
     // Create cassie simulation
-    const char modelfile[] = "../model/cassie.xml";
+
     cassie_sim_t *sim = cassie_sim_init(modelfile, false);
     cassie_vis_t *vis;
     if (visualize)

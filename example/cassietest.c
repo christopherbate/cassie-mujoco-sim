@@ -20,9 +20,9 @@
 #include <stdlib.h>
 #include <time.h>
 
-int main(void)
+int main(int argc, char** argv)
 {
-    const char* modelfile = "../model/cassie.xml";
+    const char* modelfile = argv[1];
     cassie_sim_t *c = cassie_sim_init(modelfile, false);
     cassie_vis_t *v = cassie_vis_init(c, modelfile, false);
   

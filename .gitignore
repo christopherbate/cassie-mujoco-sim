@@ -19,3 +19,7 @@ example/test_doublevis
 example/test_hfield
 example/test_terrain
 example/vel_check
+
+/.cache/
+/.mujoco/
+/*.egg-info

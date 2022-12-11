@@ -17,20 +17,18 @@
 #ifndef CASSIEMUJOCO_H
 #define CASSIEMUJOCO_H
 
+#include "cassie_in_t.h"
+#include "cassie_out_t.h"
+#include "cassie_user_in_t.h"
+#include "pd_in_t.h"
+#include "state_out_t.h"
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "cassie_out_t.h"
-#include "cassie_in_t.h"
-#include "cassie_user_in_t.h"
-#include "state_out_t.h"
-#include "pd_in_t.h"
-
 
 typedef struct cassie_sim cassie_sim_t;
 typedef struct cassie_vis cassie_vis_t;
 typedef struct cassie_state cassie_state_t;
-
 
 #ifdef __cplusplus
 extern "C" {
@@ -305,7 +303,25 @@ void cassie_sim_get_jacobian(cassie_sim_t *c, double *jac, const char* name);
 
 void cassie_sim_get_jacobian_full(cassie_sim_t *c, double *jac, double *jac_rot, const char* name);
 
-void cassie_sim_get_jacobian_full_site(cassie_sim_t *c, double *jac, double *jac_rot, const char* name);
+void cassie_sim_get_jacobian_full_site(cassie_sim_t *c, double *jac,
+                                       double *jac_rot, const char *name);
+
+// Additional public functions                                       
+
+double *cassie_sim_dof_damping(cassie_sim_t *c);
+
+void cassie_sim_set_body_mass(cassie_sim_t *c, double *mass);
+void cassie_sim_set_dof_damping(cassie_sim_t *c, double *damp);
+double *cassie_sim_body_mass(cassie_sim_t *c);
+double *cassie_sim_body_ipos(cassie_sim_t *c);
+
+void cassie_sim_set_body_ipos(cassie_sim_t *c, double *ipos);
+void cassie_sim_set_const(cassie_sim_t *c);
+void cassie_sim_params(cassie_sim_t *c, int *params);
+int cassie_sim_nv(const cassie_sim_t *c);
+int cassie_sim_nbody(const cassie_sim_t *c);
+int cassie_sim_nq(const cassie_sim_t *c);
+int cassie_sim_ngeom(const cassie_sim_t *c);
 
 /*******************************************************************************
  * Cassie visualizer functions

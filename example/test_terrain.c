@@ -64,9 +64,9 @@ void shift_terrain_y(float* hdata, int offset, int nrow, int ncol) {
     }
 }
 
-int main(void)
+int main(int argc, char** argv)
 {
-    const char modelfile[] = "../model/cassie_hfield.xml";
+    const char *modelfile = argv[1];
     cassie_sim_t *c = cassie_sim_init(modelfile, false);
     cassie_vis_t *v = cassie_vis_init(c, modelfile, false);
     time_t t;

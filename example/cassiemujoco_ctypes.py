@@ -11,7 +11,7 @@ _dir_path = os.path.dirname(os.path.realpath(__file__))
 
 
 _libraries = {}
-_libraries['./libcassiemujoco.so'] = ctypes.CDLL(_dir_path + '/libcassiemujoco.so')
+_libraries['./libcassiemujoco.so'] = ctypes.CDLL(_dir_path + "/../build/src/libCassieMujocoSim.so")
 # if local wordsize is same as target, keep ctypes pointer function.
 if ctypes.sizeof(ctypes.c_void_p) == 8:
     POINTER_T = ctypes.POINTER
