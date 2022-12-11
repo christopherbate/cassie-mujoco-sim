@@ -10,11 +10,13 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 
+include(cmake/CPM.cmake)
+include(cmake/Tools.cmake)
+
 # -------------------------------------------------
 # Dependencies
 # -------------------------------------------------
 find_package(glfw3 3.3 REQUIRED)
-
 
 find_package(Threads REQUIRED)
 find_library(libdl NAMES dl REQUIRED)
@@ -33,8 +35,6 @@ target_include_directories(AgilityCassie INTERFACE
   "${cassie_mujoco_dir}/external/agilitycassie/include"
   "${cassie_mujoco_dir}/include")
 
-# add_subdirectory(external/pybind11)
-
 # Mujoco might exist as a target if this project
 # is being built as part of a larger project and 
 # mujoco is built from source. Otherwise, find the 
@@ -47,22 +47,14 @@ else()
   find_package(mujoco REQUIRED)
   set(mujoco_dep_ mujoco::mujoco)  
 endif()
-# # include_directories(.mujoco/mujoco200/include)
-# # find_library(mujoco_library NAMES mujoco200
-# #   HINTS ${CMAKE_CURRENT_LIST_DIR}/.mujoco/mujoco200/bin
-# #   REQUIRED
-# )
-
 add_subdirectory(third_party/pybind11)
 include_directories(include)
-
-add_compile_options(-g)
 
 # -------------------------------------------------
 # Targets
 # -------------------------------------------------
 include(cmake/Targets.cmake)
-add_compile_definitions(CASSIE_SIM_MODEL_DIR="${CMAKE_CURRENT_LIST_DIR}/model/")
 
 add_subdirectory(src)
 add_subdirectory(example)
+add_subdirectory(python)

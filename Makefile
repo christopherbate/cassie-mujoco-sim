@@ -1,7 +1,9 @@
 buildDir := $(shell pwd)/build
 configure:
 	mkdir -p $(buildDir)
-	cmake -B $(buildDir) -S . -GNinja -DBUILD_SHARED_LIBS=ON
+	cmake -B $(buildDir) -S . -GNinja \
+		-DBUILD_SHARED_LIBS=ON \
+		-DUSE_SANITIZER=Address
 
 build:
 	cmake --build $(buildDir) -j $(shell nproc)
