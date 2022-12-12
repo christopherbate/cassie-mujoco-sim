@@ -11,4 +11,12 @@ build:
 test: build
 	cd $(buildDir)/test && ctest --output-on-failure
 
-.PHONY: configure build test
+.ONESHELL:
+wheel:
+	cd python
+	rm -rf build dist | true
+	python setup.py bdist_wheel
+	cd dist && unzip *.whl
+	pip install *.whl --no-deps --force-reinstall
+
+.PHONY: configure build test wheel
